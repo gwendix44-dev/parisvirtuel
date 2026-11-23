@@ -103,6 +103,36 @@ export function teamForm(world, teamId, g, season, round) {
   return out;
 }
 
+// Derniers résultats d'une équipe (peut remonter aux saisons précédentes), du plus récent au plus ancien.
+export function recentResults(world, teamId, g, season, round, n = 10) {
+  const key = `rec|${teamId}|${g}|${season}|${round}|${n}`;
+  if (world.cache.has(key)) return world.cache.get(key);
+  const grp = world.groups[g], out = [];
+  for (let idx = season * grp.rounds + round - 1, scanned = 0; idx >= 0 && out.length < n && scanned < grp.rounds * 2; idx--, scanned++) {
+    const m = roundMatches(world, g, Math.floor(idx / grp.rounds), idx % grp.rounds).find((x) => x.home === teamId || x.away === teamId);
+    if (!m) continue;
+    const sm = simulate(world, m), home = m.home === teamId, f = home ? sm.ftHome : sm.ftAway, a = home ? sm.ftAway : sm.ftHome;
+    out.push({ id: m.id, home, opp: home ? m.away : m.home, f, a, res: f > a ? 'V' : f === a ? 'N' : 'D' });
+  }
+  world.cache.set(key, out);
+  return out;
+}
+
+// Derniers face-à-face entre les deux équipes d'un match (simulations des saisons passées incluses).
+export function headToHead(world, m, n = 5) {
+  const key = `h2h|${m.id}|${n}`;
+  if (world.cache.has(key)) return world.cache.get(key);
+  const grp = world.groups[m.g], out = [];
+  for (let idx = m.season * grp.rounds + m.round - 1, scanned = 0; idx >= 0 && out.length < n && scanned < grp.rounds * 3; idx--, scanned++) {
+    const x = roundMatches(world, m.g, Math.floor(idx / grp.rounds), idx % grp.rounds).find((y) => (y.home === m.home && y.away === m.away) || (y.home === m.away && y.away === m.home));
+    if (!x) continue;
+    const sm = simulate(world, x);
+    out.push({ id: x.id, home: x.home, away: x.away, ftHome: sm.ftHome, ftAway: sm.ftAway });
+  }
+  world.cache.set(key, out);
+  return out;
+}
+
 export function lambdas(world, homeId, awayId, m) {
   const h = world.teams[homeId], a = world.teams[awayId];
   const clamp = (x) => Math.min(4.5, Math.max(0.25, x));

@@ -184,3 +184,11 @@ main{padding-bottom:70px}
 .sheet p{color:var(--mist);margin:8px 0;line-height:1.4}
 
 .note{color:var(--mist);font-size:13px;line-height:1.35;margin:0 0 10px}.tk{padding:12px 14px;border-bottom:1px solid var(--line)}
+
+.gauge{display:flex;height:22px;border-radius:7px;overflow:hidden;gap:2px}
+.gauge span{display:grid;place-items:center;font:700 13px var(--num);color:var(--pitch)}
+.gV{background:var(--win)}.gN{background:var(--mist)}.gD{background:var(--live);color:#fff!important}
+.glab{display:flex;justify-content:space-between;font-size:11px;color:var(--mist);margin-top:4px}
+.h2h{display:grid;grid-template-columns:22px 1fr 56px 1fr 22px;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.h2h .logo{margin:0}.h2h .hn.r{text-align:right}.h2h b{font:700 18px var(--num);text-align:center;color:var(--flood)}
+.h2hs{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:10px;margin-top:2px;color:var(--mist);font-size:13px;font-weight:600}

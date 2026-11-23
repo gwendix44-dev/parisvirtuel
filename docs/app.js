@@ -1,4 +1,4 @@
-import { createWorld, teamForm, slotOf, matchesOfSlot, matchById, marketsOf, liveState, resultOf, simulate, tableAt, slotStart, SLOT_MS, BETTING_AHEAD, VERSION } from './sim.js';
+import { createWorld, teamForm, recentResults, headToHead, slotOf, matchesOfSlot, matchById, marketsOf, liveState, resultOf, simulate, tableAt, slotStart, SLOT_MS, BETTING_AHEAD, VERSION } from './sim.js';
 import { settleBet, comboOdds, round2 } from './settle.js';
 
 // ---------- horloge (le paramètre ?speed=N accélère le temps, pour tester) ----------
@@ -193,13 +193,28 @@ function eventsHtml(m) {
   });
   return rows.length ? `<div class="evs">${rows.join('')}</div>` : `<div class="empty"><b>Rien à signaler</b>Aucun but ni carton pour l'instant.</div>`;
 }
-const dots = (f) => f.seq.length ? f.seq.map((x) => `<i class="fm f${x}">${x}</i>`).join('') : '<small class="muted">Début de saison</small>';
+const dots = (r) => r.length ? r.slice(0, 5).map((x) => `<i class="fm f${x.res}">${x.res}</i>`).join('') : '<small class="muted">Début de saison</small>';
 const lvl = (v) => v >= 1.25 ? 'Très fort' : v >= 1.05 ? 'Solide' : v >= 0.9 ? 'Moyen' : 'Fragile';
-function profile(t, f) {
-  const att = t.att, dfn = 1 / t.def;
+function gauge(r) {
+  if (!r.length) return '';
+  const c = { V: 0, N: 0, D: 0 };
+  r.forEach((x) => c[x.res]++);
+  const seg = (k, l) => c[k] ? `<span class="g${k}" style="flex:${c[k]}">${c[k]}</span>` : '';
+  return `<div class="gauge" title="${r.length} derniers matchs">${seg('V')}${seg('N')}${seg('D')}</div><div class="glab"><span>${c.V} gagné${c.V > 1 ? 's' : ''}</span><span>${c.N} nul${c.N > 1 ? 's' : ''}</span><span>${c.D} perdu${c.D > 1 ? 's' : ''}</span></div>`;
+}
+function profile(t, r) {
   return `<div class="prof"><div class="ph">${logo(t.id)}<b>${esc(t.name)}</b></div>
-    <div class="pr"><span>Forme (5 derniers)</span><div class="fms">${dots(f)}</div></div>
-    <div class="pr"><span>Attaque</span><b>${lvl(att)}</b></div><div class="pr"><span>Défense</span><b>${lvl(dfn)}</b></div></div>`;
+    <div class="pr"><span>Forme (5 derniers)</span><div class="fms">${dots(r)}</div></div>
+    <div class="pr"><span>Bilan des ${r.length} derniers matchs</span>${gauge(r)}</div>
+    <div class="pr"><span>Attaque</span><b>${lvl(t.att)}</b></div><div class="pr"><span>Défense</span><b>${lvl(1 / t.def)}</b></div></div>`;
+}
+function h2hHtml(m) {
+  const list = headToHead(S.world, m, 5);
+  if (!list.length) return `<div class="panel pad"><div class="shead"><span>Derniers face-à-face</span></div><small class="muted">Première rencontre entre ces deux équipes.</small></div>`;
+  let wh = 0, d = 0, wa = 0;
+  list.forEach((x) => { const hw = x.home === m.home ? x.ftHome : x.ftAway, aw = x.home === m.home ? x.ftAway : x.ftHome; hw > aw ? wh++ : hw < aw ? wa++ : d++; });
+  const rows = list.map((x) => `<div class="h2h">${logo(x.home, 'xs')}<span class="hn r">${esc(TEAM(x.home).short)}</span><b>${x.ftHome} - ${x.ftAway}</b><span class="hn">${esc(TEAM(x.away).short)}</span>${logo(x.away, 'xs')}</div>`).join('');
+  return `<div class="panel pad"><div class="shead"><span>Derniers face-à-face</span></div>${rows}<div class="h2hs"><span>${esc(TEAM(m.home).short)} ${wh}</span><span>Nuls ${d}</span><span>${esc(TEAM(m.away).short)} ${wa}</span></div></div>`;
 }
 function statsHtml(m) {
   const h = TEAM(m.home), a = TEAM(m.away);
@@ -209,8 +224,8 @@ function statsHtml(m) {
   const tops = (t) => top(t).map((p) => `<div class="tp">${face(p, 'sm')}<span class="pn">${esc(p.name)}<small>${p.goals} but${p.goals > 1 ? 's' : ''} en ${p.apps} match${p.apps > 1 ? 's' : ''}</small></span></div>`).join('') || '<small class="muted">Pas de buteur</small>';
   const tb = tableAt(S.world, m.g, m.season, m.round);
   const mine = (id) => id === m.home || id === m.away;
-  const fh = teamForm(S.world, m.home, m.g, m.season, m.round), fa = teamForm(S.world, m.away, m.g, m.season, m.round);
-  return `<div class="panel pad two">${profile(h, fh)}${profile(a, fa)}</div><div class="panel pad"><div class="shead">${logo(m.home)}<span>Stats réelles de la saison</span>${logo(m.away)}</div>
+  const fh = recentResults(S.world, m.home, m.g, m.season, m.round, 10), fa = recentResults(S.world, m.away, m.g, m.season, m.round, 10);
+  return `<div class="panel pad two">${profile(h, fh)}${profile(a, fa)}</div>${h2hHtml(m)}<div class="panel pad"><div class="shead">${logo(m.home)}<span>Stats réelles de la saison</span>${logo(m.away)}</div>
     ${row('Classement', '#' + h.rank, '#' + a.rank)}${row('Points', h.pts, a.pts)}${row('Matchs joués', h.gp, a.gp)}
     ${row('Buts marqués / match', pg(h, 'gf'), pg(a, 'gf'))}${row('Buts encaissés / match', pg(h, 'ga'), pg(a, 'ga'))}
     ${row('Bilan V-N-D', `${h.w}-${h.d}-${h.l}`, `${a.w}-${a.d}-${a.l}`)}</div>
