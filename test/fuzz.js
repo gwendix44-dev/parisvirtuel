@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { settleBet } from '../public/settle.js';
+import { settleBet } from '../docs/settle.js';
 let seed = 42; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
 const ri = (n) => Math.floor(rnd() * n);
 const MK = [['1N2', ['1', 'X', '2']], ['DC', ['1X', '12', 'X2']], ['DNB', ['1', '2']], ['BTTS', ['yes', 'no']], ['OU', ['over', 'under']]];

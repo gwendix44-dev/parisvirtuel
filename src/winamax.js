@@ -186,6 +186,8 @@ export async function scrapeWinamax({ detailLimit = 40, detailHorizonH = 30, log
   const state = extractState(html);
   if (!state) throw new Error('PRELOADED_STATE introuvable (page changée ou accès bloqué)');
   const list = parseState(state);
+  if (!list.size)
+    throw new Error("Aucun match lu sur Winamax : la page ne contient plus les matchs (chargés après coup par le site). Source de cotes à changer.");
   const now = Date.now();
   const targets = [...list.values()]
     .filter((m) => m.kickoff > now && m.kickoff < now + detailHorizonH * 3600e3)

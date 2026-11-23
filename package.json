@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "update": "node scripts/update.js",
     "demo": "DEMO=1 node server.js",
     "test": "node test/run.js"
   },

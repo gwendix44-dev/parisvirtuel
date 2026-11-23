@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { legOutcome, settleBet } from '../public/settle.js';
+import { legOutcome, settleBet } from '../docs/settle.js';
 import { extractState, parseState } from '../src/winamax.js';
-import { teamSim, matchFixture, fixtureToState } from '../src/livescores.js';
+import { teamSim, matchEvent, eventToState } from '../src/scores.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log('ok  ' + name); };
@@ -63,15 +63,27 @@ t('parse PRELOADED_STATE Winamax (fixture)', () => {
   assert.deepEqual(m.markets.find((x) => x.kind === 'DC').selections.map((s) => s.pick), ['1X', '12', 'X2']);
 });
 
-t('rapprochement Winamax ↔ API-Football', () => {
-  assert.ok(teamSim('Paris SG', 'Paris Saint Germain') > 0.9);
+t('rapprochement Winamax ↔ ESPN et statuts', () => {
+  assert.ok(teamSim('Paris SG', 'Paris Saint-Germain') > 0.9);
   assert.ok(teamSim('Lens', 'RC Lens') > 0.9);
   assert.ok(teamSim('Nantes', 'Rennes') < 0.5);
   const ko = Date.parse('2026-11-23T20:00:00Z');
-  const fx = (id, h, a) => ({ fixture: { id, date: new Date(ko).toISOString(), status: { short: 'FT', elapsed: 90 } }, teams: { home: { name: h }, away: { name: a } }, goals: { home: 2, away: 1 }, score: { fulltime: { home: 2, away: 1 } } });
-  const f = matchFixture({ home: 'Paris SG', away: 'Marseille', kickoff: ko }, [fx(1, 'Nantes', 'Rennes'), fx(2, 'Paris Saint Germain', 'Olympique Marseille')]);
-  assert.equal(f.fixture.id, 2);
-  assert.deepEqual(fixtureToState(f).status, 'finished');
+  const ev = (home, away, hs, as, type, extra = {}) => ({ date: new Date(ko).toISOString(), status: { displayClock: "35'", type }, competitions: [{ competitors: [
+    { homeAway: 'home', score: String(hs), team: { id: '1', displayName: home } }, { homeAway: 'away', score: String(as), team: { id: '2', displayName: away } }], ...extra }] });
+  const FT = { name: 'STATUS_FULL_TIME', state: 'post', completed: true };
+  const list = [ev('Nantes', 'Rennes', 0, 0, FT), ev('Paris Saint-Germain', 'Marseille', 2, 1, FT)];
+  const f = matchEvent({ home: 'Paris SG', away: 'Olympique de Marseille', kickoff: ko }, list);
+  assert.equal(f.competitions[0].competitors[0].team.displayName, 'Paris Saint-Germain');
+  assert.deepEqual([eventToState(f).status, eventToState(f).ftHome, eventToState(f).ftAway], ['finished', 2, 1]);
+  assert.equal(eventToState(ev('A', 'B', 1, 0, { name: 'STATUS_FIRST_HALF', state: 'in' })).status, 'live');
+  assert.equal(eventToState(ev('A', 'B', 1, 0, { name: 'STATUS_HALFTIME', state: 'in' })).code, 'HT');
+  assert.equal(eventToState(ev('A', 'B', 0, 0, { name: 'STATUS_SCHEDULED', state: 'pre' })).status, 'pending');
+  assert.equal(eventToState(ev('A', 'B', 0, 0, { name: 'STATUS_POSTPONED', state: 'pre' })).status, 'void');
+  // prolongation : le score à 90 min vient des buts détaillés (but à 105' ignoré)
+  const goal = (min, tid) => ({ scoringPlay: true, shootout: false, team: { id: tid }, clock: { displayValue: min } });
+  const aet = ev('A', 'B', 2, 1, { name: 'STATUS_FINAL_AET', state: 'post', completed: true }, { details: [goal("20'", '1'), goal("90'+2'", '2'), goal("105'", '1')] });
+  const st = eventToState(aet);
+  assert.deepEqual([st.ftHome, st.ftAway, st.approx], [1, 1, undefined]);
 });
 
 console.log(`\n${n} groupes de tests OK`);

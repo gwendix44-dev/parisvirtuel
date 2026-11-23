@@ -8,7 +8,7 @@ const LS = {
 const START = 1000;
 const S = {
   tab: 'matches', filter: 'all', mode: 'single', stake: '10',
-  matches: [], live: {}, expanded: new Set(), meta: {},
+  matches: [], live: {}, tracked: {}, expanded: new Set(), meta: {},
   balance: LS.get('balance', START), bets: LS.get('bets', []), slip: LS.get('slip', []),
 };
 const save = () => { LS.set('balance', S.balance); LS.set('bets', S.bets); LS.set('slip', S.slip); };
@@ -73,34 +73,32 @@ function place() {
 }
 
 // ---------- règlement ----------
-async function settleAll() {
-  const legs = new Map();
-  for (const b of S.bets) if (b.status === 'pending') for (const l of b.legs) if (l.status === 'pending') legs.set(l.matchId, { id: l.matchId, home: l.home, away: l.away, kickoff: l.kickoff });
-  if (!legs.size) return;
-  let data;
-  try {
-    const r = await fetch('/api/results', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ legs: [...legs.values()] }) });
-    data = await r.json();
-  } catch { return; }
-  Object.assign(S.live, data.live || {});
+function settleAll() {
+  const results = {};
+  for (const [id, t] of Object.entries(S.tracked)) if (t.result) results[id] = t.result;
   let changed = false;
   S.bets = S.bets.map((b) => {
     if (b.status !== 'pending') return b;
-    const nb = settleBet(b, data.results || {});
-    if (nb !== b && JSON.stringify(nb.legs) !== JSON.stringify(b.legs)) changed = true;
+    const nb = settleBet(b, results);
+    if (JSON.stringify(nb.legs) !== JSON.stringify(b.legs)) changed = true;
     if (nb.status !== 'pending') { S.balance = round2(S.balance + nb.payout); toast(nb.status === 'won' ? `Gagné ! +${eur(nb.payout)}` : nb.status === 'lost' ? 'Pari perdu' : 'Pari remboursé'); }
     return nb;
   });
-  if (changed) { save(); render(); }
+  if (changed) save();
 }
 
 // ---------- données ----------
 async function refresh() {
   try {
-    const d = await (await fetch('/api/matches')).json();
+    const r = await fetch('data/state.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('Pas encore de données : la première mise à jour peut prendre quelques minutes.');
+    const d = await r.json();
     S.meta = d;
-    S.matches = d.matches.filter((m) => m.live?.status !== 'finished' && m.live?.status !== 'void');
-    for (const m of d.matches) if (m.live) S.live[m.id] = m.live;
+    S.tracked = d.tracked || {};
+    S.live = {};
+    for (const [id, t] of Object.entries(S.tracked)) if (t.live) S.live[id] = t.live;
+    S.matches = d.matches.map((m) => ({ ...m, live: S.tracked[m.id]?.live || null }))
+      .filter((m) => m.live?.status !== 'finished' && m.live?.status !== 'void');
     // met à jour les cotes du ticket, retire les matchs commencés
     S.slip = S.slip.flatMap((s) => {
       const m = S.matches.find((x) => x.id === s.matchId);
@@ -109,8 +107,8 @@ async function refresh() {
       return m && sel && bettable(m) ? [{ ...s, odds: sel.odds }] : [];
     });
     save();
-  } catch { S.meta = { error: 'Serveur injoignable' }; }
-  await settleAll();
+    settleAll();
+  } catch (e) { S.meta = { error: e.message || 'Données indisponibles' }; }
   render();
 }
 
@@ -209,7 +207,10 @@ function render() {
   const msgs = [];
   if (S.meta.error) msgs.push(S.meta.error);
   if (S.meta.source === 'demo') msgs.push('Mode démo : cotes fictives et scores simulés.');
-  else if (S.meta.scoresEnabled === false) msgs.push('Clé API-Football manquante : les scores en direct et le règlement sont désactivés.');
+  else if (S.meta.updatedAt) {
+    const min = Math.round((Date.now() - S.meta.updatedAt) / 60000);
+    if (min >= 20) msgs.push(`Cotes mises à jour il y a ${min >= 120 ? Math.round(min / 60) + ' h' : min + ' min'}.`);
+  }
   bn.hidden = !msgs.length; bn.textContent = msgs.join(' ');
   const keep = document.activeElement?.id === 'stake';
   $('#view').innerHTML = S.tab === 'matches' ? renderMatches() : S.tab === 'slip' ? renderSlip() : renderBets();
@@ -251,7 +252,7 @@ $('#menu').addEventListener('click', () => {
   document.body.appendChild(s);
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 render();
 refresh();
 setInterval(refresh, 30000);
