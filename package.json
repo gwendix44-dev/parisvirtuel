@@ -1,16 +1,11 @@
 {
   "name": "parisvirtuel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "update": "node scripts/update.js",
-    "demo": "DEMO=1 node server.js",
-    "test": "node test/run.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2"
+    "build-world": "node scripts/build-world.js",
+    "test": "node test/engine.js && node test/fuzz.js"
   },
   "engines": { "node": ">=18" }
 }

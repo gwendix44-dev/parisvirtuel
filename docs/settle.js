@@ -10,6 +10,11 @@ export function legOutcome(leg, r) {
     case '1N2': return leg.pick === res ? 'won' : 'lost';
     case 'DC': return leg.pick.includes(res) ? 'won' : 'lost';
     case 'DNB': return res === 'X' ? 'void' : leg.pick === res ? 'won' : 'lost';
+    case 'HT': return leg.pick === (r.htHome > r.htAway ? '1' : r.htHome < r.htAway ? '2' : 'X') ? 'won' : 'lost';
+    case 'CS': return leg.pick === `${h}-${a}` ? 'won' : 'lost';
+    case 'ANY': return r.scorers.includes(leg.pick) ? 'won' : 'lost';
+    case 'FIRST': return (r.first || 'none') === leg.pick ? 'won' : 'lost';
+    case 'YC': return (leg.pick === 'over') === r.yellows > leg.line ? 'won' : 'lost';
     case 'BTTS': return (leg.pick === 'yes') === (h > 0 && a > 0) ? 'won' : 'lost';
     case 'OU':
       if (t === leg.line) return 'void';
