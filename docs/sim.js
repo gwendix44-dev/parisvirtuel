@@ -5,7 +5,8 @@ export const SLOT_MS = 30 * 60e3;            // un créneau = un match de 30 min
 export const HALF_MS = 14 * 60e3;            // mi-temps réelle : 14 min
 export const BREAK_MS = 2 * 60e3;            // pause : 2 min
 export const BETTING_AHEAD = 6;              // paris ouverts sur les 6 prochains créneaux (3 h)
-export const VERSION = 1;                    // à incrémenter si le modèle change (les anciens paris sont alors remboursés)
+const SHARP = 1.3, FORM_W = 0.16;           // écart de niveau accentué, poids de la forme récente
+export const VERSION = 2;                    // à incrémenter si le modèle change (les anciens paris sont alors remboursés)
 
 const BASE_HOME = 1.5, BASE_AWAY = 1.2;      // buts moyens à domicile / à l'extérieur
 const HT_SHARE = 0.45;                       // part des buts marqués en 1re mi-temps
@@ -59,8 +60,8 @@ export function createWorld(raw) {
     const lg = raw.leagues.find((l) => l.id === lid);
     for (const t of list) {
       const w = t.gp / (t.gp + 6);
-      t.att = w * (t.gf / Math.max(t.gp, 1) / avg) + (1 - w);
-      t.def = w * (t.ga / Math.max(t.gp, 1) / avg) + (1 - w);
+      t.att = Math.pow(w * (t.gf / Math.max(t.gp, 1) / avg) + (1 - w), SHARP);
+      t.def = Math.pow(w * (t.ga / Math.max(t.gp, 1) / avg) + (1 - w), SHARP);
       t.str = t.strengthOverride ?? lg?.strength ?? 1;
     }
   }
@@ -79,12 +80,33 @@ export function createWorld(raw) {
   return { version: VERSION, groups, teams, cache: new Map() };
 }
 
-export function lambdas(world, homeId, awayId) {
+// Forme récente : 5 derniers matchs de la saison virtuelle (V/N/D), alimente la force de l'équipe.
+export function teamForm(world, teamId, g, season, round) {
+  const key = `form|${teamId}|${g}|${season}|${round}`;
+  if (world.cache.has(key)) return world.cache.get(key);
+  const grp = world.groups[g], n = world.groups.length, seq = [];
+  let pts = 0, gf = 0, ga = 0;
+  for (let rd = round - 1; rd >= 0 && seq.length < 5; rd--) {
+    const m = matchesOfSlot(world, (season * grp.rounds + rd) * n + g).find((x) => x.home === teamId || x.away === teamId);
+    if (!m) continue;
+    const s = simulate(world, m), home = m.home === teamId;
+    const f = home ? s.ftHome : s.ftAway, a = home ? s.ftAway : s.ftHome;
+    gf += f; ga += a;
+    if (f > a) { pts += 3; seq.push('V'); } else if (f === a) { pts++; seq.push('N'); } else seq.push('D');
+  }
+  const out = { seq, pts, gf, ga, n: seq.length, factor: seq.length ? 1 + FORM_W * (pts / (3 * seq.length) - 0.5) : 1 };
+  world.cache.set(key, out);
+  return out;
+}
+
+export function lambdas(world, homeId, awayId, m) {
   const h = world.teams[homeId], a = world.teams[awayId];
   const clamp = (x) => Math.min(4.5, Math.max(0.25, x));
+  const fh = m ? teamForm(world, homeId, m.g, m.season, m.round).factor : 1;
+  const fa = m ? teamForm(world, awayId, m.g, m.season, m.round).factor : 1;
   return {
-    lh: clamp(BASE_HOME * h.att * a.def * (h.str / a.str)),
-    la: clamp(BASE_AWAY * a.att * h.def * (a.str / h.str)),
+    lh: clamp(BASE_HOME * h.att * a.def * (h.str / a.str) * fh),
+    la: clamp(BASE_AWAY * a.att * h.def * (a.str / h.str) * fa),
   };
 }
 
@@ -142,7 +164,7 @@ export function simulate(world, m) {
   const key = 'sim|' + m.id;
   if (world.cache.has(key)) return world.cache.get(key);
   const r = rng(`v${world.version}|${m.id}`);
-  const { lh, la } = lambdas(world, m.home, m.away);
+  const { lh, la } = lambdas(world, m.home, m.away, m);
   const nH = poissonSample(lh, r), nA = poissonSample(la, r);
   const L1 = 45 + 1 + Math.floor(r() * 4), L2 = 45 + 2 + Math.floor(r() * 5);
   const events = [];
@@ -241,7 +263,7 @@ const fmtLine = (l) => String(l).replace('.', ',');
 export function marketsOf(world, m) {
   const key = 'mk|' + m.id;
   if (world.cache.has(key)) return world.cache.get(key);
-  const { lh, la } = lambdas(world, m.home, m.away);
+  const { lh, la } = lambdas(world, m.home, m.away, m);
   const H = world.teams[m.home], A = world.teams[m.away];
   const N = 14;
   const grid = (x, y) => { const ph = [], pa = []; for (let i = 0; i <= N; i++) { ph.push(pois(x, i)); pa.push(pois(y, i)); } return [ph, pa]; };
@@ -302,7 +324,7 @@ export function marketsOf(world, m) {
 
 // Probabilités "vraies" du modèle, pour les tests de calibration.
 export function trueProbs(world, m) {
-  const { lh, la } = lambdas(world, m.home, m.away);
+  const { lh, la } = lambdas(world, m.home, m.away, m);
   let pH = 0, pD = 0, pA = 0, o25 = 0, btts = 0;
   for (let i = 0; i <= 14; i++) for (let j = 0; j <= 14; j++) {
     const p = pois(lh, i) * pois(la, j);

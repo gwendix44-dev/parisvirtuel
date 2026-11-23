@@ -1,4 +1,4 @@
-import { createWorld, slotOf, matchesOfSlot, matchById, marketsOf, liveState, resultOf, simulate, tableAt, slotStart, SLOT_MS, BETTING_AHEAD, VERSION } from './sim.js';
+import { createWorld, teamForm, slotOf, matchesOfSlot, matchById, marketsOf, liveState, resultOf, simulate, tableAt, slotStart, SLOT_MS, BETTING_AHEAD, VERSION } from './sim.js';
 import { settleBet, comboOdds, round2 } from './settle.js';
 
 // ---------- horloge (le paramètre ?speed=N accélère le temps, pour tester) ----------
@@ -11,13 +11,14 @@ const LS = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('pv_' + k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('pv_' + k, JSON.stringify(v)); } catch {} },
 };
-const START = 1000;
+const START = 100, REFILL_MS = 24 * 3600e3;
+if (LS.get('ver', 0) !== 2) { for (const k of ['balance', 'bets', 'slip', 'broke']) localStorage.removeItem('pv_' + k); LS.set('ver', 2); }
 const S = {
   tab: 'matches', filter: 'all', league: 'all', mode: 'single', stake: '10',
   world: null, detail: null, dtab: 'bets', open: new Set(['1N2']), sig: '',
-  balance: LS.get('balance', START), bets: LS.get('bets', []), slip: LS.get('slip', []),
+  balance: LS.get('balance', START), broke: LS.get('broke', null), bets: LS.get('bets', []), slip: LS.get('slip', []),
 };
-const save = () => { LS.set('balance', S.balance); LS.set('bets', S.bets); LS.set('slip', S.slip); };
+const save = () => { LS.set('balance', S.balance); LS.set('bets', S.bets); LS.set('slip', S.slip); LS.set('broke', S.broke); };
 
 // ---------- utilitaires ----------
 const $ = (s) => document.querySelector(s);
@@ -94,6 +95,11 @@ function settleAll() {
     }
     return nb;
   });
+  const t2 = now();
+  if (S.balance < 0.01 && !S.bets.some(pending)) {
+    if (!S.broke) { S.broke = t2; changed = true; }
+    else if (t2 - S.broke >= REFILL_MS) { S.balance = START; S.broke = null; changed = true; toast('+100 € : nouveau dépôt'); }
+  } else if (S.broke) { S.broke = null; changed = true; }
   if (changed) { save(); $('#bal b').textContent = eur(S.balance); }
   return changed;
 }
@@ -191,6 +197,14 @@ function eventsHtml(m) {
   });
   return rows.length ? `<div class="evs">${rows.join('')}</div>` : `<div class="empty"><b>Rien à signaler</b>Aucun but ni carton pour l'instant.</div>`;
 }
+const dots = (f) => f.seq.length ? f.seq.map((x) => `<i class="fm f${x}">${x}</i>`).join('') : '<small class="muted">Début de saison</small>';
+const lvl = (v) => v >= 1.25 ? 'Très fort' : v >= 1.05 ? 'Solide' : v >= 0.9 ? 'Moyen' : 'Fragile';
+function profile(t, f) {
+  const att = t.att, dfn = 1 / t.def;
+  return `<div class="prof"><div class="ph">${logo(t.id)}<b>${esc(t.name)}</b></div>
+    <div class="pr"><span>Forme (5 derniers)</span><div class="fms">${dots(f)}</div></div>
+    <div class="pr"><span>Attaque</span><b>${lvl(att)}</b></div><div class="pr"><span>Défense</span><b>${lvl(dfn)}</b></div></div>`;
+}
 function statsHtml(m) {
   const h = TEAM(m.home), a = TEAM(m.away);
   const row = (lbl, x, y) => `<div class="srow"><b>${x}</b><span>${lbl}</span><b>${y}</b></div>`;
@@ -199,7 +213,8 @@ function statsHtml(m) {
   const tops = (t) => top(t).map((p) => `<div class="tp">${face(p, 'sm')}<span class="pn">${esc(p.name)}<small>${p.goals} but${p.goals > 1 ? 's' : ''} en ${p.apps} match${p.apps > 1 ? 's' : ''}</small></span></div>`).join('') || '<small class="muted">Pas de buteur</small>';
   const tb = tableAt(S.world, m.g, m.season, m.round);
   const mine = (id) => id === m.home || id === m.away;
-  return `<div class="panel pad"><div class="shead">${logo(m.home)}<span>Stats réelles de la saison</span>${logo(m.away)}</div>
+  const fh = teamForm(S.world, m.home, m.g, m.season, m.round), fa = teamForm(S.world, m.away, m.g, m.season, m.round);
+  return `<div class="panel pad two">${profile(h, fh)}${profile(a, fa)}</div><div class="panel pad"><div class="shead">${logo(m.home)}<span>Stats réelles de la saison</span>${logo(m.away)}</div>
     ${row('Classement', '#' + h.rank, '#' + a.rank)}${row('Points', h.pts, a.pts)}${row('Matchs joués', h.gp, a.gp)}
     ${row('Buts marqués / match', pg(h, 'gf'), pg(a, 'gf'))}${row('Buts encaissés / match', pg(h, 'ga'), pg(a, 'ga'))}
     ${row('Bilan V-N-D', `${h.w}-${h.d}-${h.l}`, `${a.w}-${a.d}-${a.l}`)}</div>
@@ -234,7 +249,7 @@ function renderSlip() {
     ${S.mode === 'combo' && S.slip.length < 2 ? '<div class="warn">Un combiné demande au moins 2 sélections.</div>' : ''}
     ${i.dup ? '<div class="warn">Combiné impossible : deux sélections sont du même match.</div>' : ''}
     <div class="stake"><input id="stake" inputmode="decimal" aria-label="Mise" value="${esc(S.stake)}" placeholder="0"><span>€${S.mode === 'single' && S.slip.length > 1 ? ' par pari' : ''}</span></div>
-    <div class="quick">${[5, 10, 25, 50].map((v) => `<button data-a="q" data-v="${v}">${v} €</button>`).join('')}<button data-a="q" data-v="max">Max</button></div>
+    <div class="quick">${[5, 10, 20, 50].map((v) => `<button data-a="q" data-v="${v}">${v} €</button>`).join('')}<button data-a="q" data-v="max">Max</button></div>
     ${i.odds ? `<div class="row"><span>Cote combinée</span><b>${cote(i.odds)}</b></div>` : ''}
     <div class="row"><span>Mise totale</span><b>${eur(i.total)}</b></div>
     <div class="row"><span>Gain potentiel</span><b class="gain">${eur(i.gain)}</b></div>
@@ -272,8 +287,9 @@ function renderAll() {
   sb.hidden = !S.slip.length || S.tab !== 'matches' || !!S.detail;
   if (!sb.hidden) sb.innerHTML = `<span>Ticket, ${S.slip.length} sélection${S.slip.length > 1 ? 's' : ''}</span><b>Voir</b>`;
   const bn = $('#banner');
-  bn.hidden = SPEED === 1;
-  bn.textContent = `Mode accéléré ×${SPEED} (test).`;
+  const left = S.broke ? Math.max(0, REFILL_MS - (now() - S.broke)) : 0;
+  bn.hidden = SPEED === 1 && !S.broke;
+  bn.textContent = S.broke ? `Solde épuisé : nouveau dépôt de 100 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.` : `Mode accéléré ×${SPEED} (test).`;
   const keep = document.activeElement?.id === 'stake';
   $('#view').innerHTML = S.tab === 'matches' ? renderMatches() : S.tab === 'slip' ? renderSlip() : renderBets();
   S.sig = sigNow();
@@ -288,6 +304,7 @@ let lastEv = '';
 function tick() {
   if (!S.world) return;
   const changed = settleAll();
+  if (S.broke) { const bn = $('#banner'); const left = Math.max(0, REFILL_MS - (now() - S.broke)); bn.hidden = false; bn.textContent = `Solde épuisé : nouveau dépôt de 100 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.`; }
   if (sigNow() !== S.sig || (changed && S.tab !== 'matches')) { renderAll(); return; }
   if (S.tab === 'matches') {
     document.querySelectorAll('.match').forEach((el) => {
@@ -321,7 +338,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'league') { S.league = t.dataset.v; renderAll(); }
   else if (a === 'rm') { S.slip = S.slip.filter((s) => s.key !== t.dataset.k); save(); renderAll(); }
   else if (a === 'mode') { S.mode = t.dataset.v; renderAll(); }
-  else if (a === 'q') { S.stake = t.dataset.v === 'max' ? String(Math.floor(S.balance)) : t.dataset.v; renderAll(); }
+  else if (a === 'q') { S.stake = t.dataset.v === 'max' ? String(Math.floor(S.balance * 100) / 100) : t.dataset.v; renderAll(); }
   else if (a === 'place') place();
 });
 document.addEventListener('input', (e) => { if (e.target.id === 'stake') { S.stake = e.target.value; renderAll(); } });
@@ -330,13 +347,8 @@ $('#slipbar').addEventListener('click', () => { S.tab = 'slip'; renderAll(); win
 $('#menu').addEventListener('click', () => {
   const s = document.createElement('div');
   s.className = 'sheet';
-  s.innerHTML = `<div><b>Menu</b><button data-x="top">Ajouter 1 000 € virtuels</button><button data-x="reset" class="danger">Tout réinitialiser</button><button data-x="close">Fermer</button></div>`;
-  s.addEventListener('click', (e) => {
-    const x = e.target.dataset?.x;
-    if (e.target === s || x === 'close') return s.remove();
-    if (x === 'top') { S.balance = round2(S.balance + 1000); save(); renderAll(); toast('+1 000 € ajoutés'); s.remove(); }
-    if (x === 'reset' && confirm('Effacer solde, ticket et historique de paris ?')) { S.balance = START; S.bets = []; S.slip = []; save(); renderAll(); s.remove(); }
-  });
+  s.innerHTML = `<div><b>Règles</b><p>Dépôt de départ : 100 € fictifs. Si tu dépenses tout et qu'aucun pari n'est en cours, 100 € te sont rendus 24 h plus tard.</p><p>Un match dure 30 minutes. Les résultats viennent d'une simulation basée sur les vraies stats et la forme des équipes.</p><button data-x="close">Fermer</button></div>`;
+  s.addEventListener('click', (e) => { if (e.target === s || e.target.dataset?.x === 'close') s.remove(); });
   document.body.appendChild(s);
 });
 
