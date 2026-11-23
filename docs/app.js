@@ -53,25 +53,21 @@ function toggleSel(mid, kind, line, pick) {
 }
 const stakeNum = () => Math.max(0, parseFloat(String(S.stake).replace(',', '.')) || 0);
 function slipInfo() {
+  // un seul ticket : 1 sélection = pari simple, 2 ou plus = combiné (une seule mise, cotes multipliées)
   const n = S.slip.length, st = stakeNum();
   const dup = new Set(S.slip.map((s) => s.matchId)).size < n;
-  if (S.mode === 'combo') {
-    const o = n ? comboOdds(S.slip) : 0;
-    return { total: st, odds: o, gain: round2(st * o), ok: n >= 2 && !dup && st > 0 && st <= S.balance, dup };
-  }
-  const total = round2(st * n);
-  return { total, odds: null, gain: round2(S.slip.reduce((a, s) => a + st * s.odds, 0)), ok: n >= 1 && st > 0 && total <= S.balance, dup: false };
+  const odds = n ? comboOdds(S.slip) : 0;
+  return { total: st, odds, gain: round2(st * odds), ok: n >= 1 && !dup && st > 0 && st <= S.balance, dup };
 }
 function place() {
   const info = slipInfo();
   if (!info.ok) return;
   const st = stakeNum(), t = now();
-  const mk = (legs, stake) => ({ id: t + '-' + Math.random().toString(36).slice(2, 6), placedAt: t, type: legs.length > 1 ? 'combo' : 'single', stake, legs: legs.map((l) => ({ ...l, status: 'pending' })), status: 'pending', payout: 0 });
-  const created = S.mode === 'combo' ? [mk(S.slip, st)] : S.slip.map((s) => mk([s], st));
-  S.bets = [...created, ...S.bets];
-  S.balance = round2(S.balance - info.total);
+  const bet = { id: t + '-' + Math.random().toString(36).slice(2, 6), placedAt: t, type: S.slip.length > 1 ? 'combo' : 'single', stake: st, legs: S.slip.map((l) => ({ ...l, status: 'pending' })), status: 'pending', payout: 0 };
+  S.bets = [bet, ...S.bets];
+  S.balance = round2(S.balance - st);
   S.slip = []; S.tab = 'bets'; S.detail = null;
-  save(); renderAll(); toast('Pari validé');
+  save(); renderAll(); toast('Ticket validé');
 }
 
 // ---------- règlement (calculé sur place, identique sur tous les téléphones) ----------
@@ -243,25 +239,25 @@ function renderSlip() {
   if (!S.slip.length) return `<div class="empty"><b>Ton ticket est vide</b>Touche une cote dans l'onglet Matchs pour l'ajouter.</div>`;
   const i = slipInfo();
   const legs = S.slip.map((s) => `<div class="leg"><div><b>${esc(s.label)}</b><span class="q">${cote(s.odds)}</span><div class="t">${esc(s.title)}</div><div class="t">${esc(s.home)} - ${esc(s.away)}, ${hm(s.kickoff)}</div></div><button class="x" data-a="rm" data-k="${esc(s.key)}" aria-label="Retirer">✕</button></div>`).join('');
-  return `<div class="panel">${legs}</div>
+  const n = S.slip.length;
+  return `<div class="panel"><div class="h tk"><b>${n > 1 ? `Combiné de ${n} sélections` : 'Pari simple'}</b></div>${legs}</div>
   <div class="panel pad">
-    <div class="seg"><button data-a="mode" data-v="single" class="${S.mode === 'single' ? 'on' : ''}">Simple</button><button data-a="mode" data-v="combo" class="${S.mode === 'combo' ? 'on' : ''}">Combiné</button></div>
-    ${S.mode === 'combo' && S.slip.length < 2 ? '<div class="warn">Un combiné demande au moins 2 sélections.</div>' : ''}
-    ${i.dup ? '<div class="warn">Combiné impossible : deux sélections sont du même match.</div>' : ''}
-    <div class="stake"><input id="stake" inputmode="decimal" aria-label="Mise" value="${esc(S.stake)}" placeholder="0"><span>€${S.mode === 'single' && S.slip.length > 1 ? ' par pari' : ''}</span></div>
+    ${i.dup ? '<div class="warn">Deux sélections du même match : retire-en une pour valider.</div>' : ''}
+    ${n > 1 ? '<div class="note">Une seule mise pour tout le ticket. Si une sélection est perdue, tout le ticket est perdu.</div>' : ''}
+    <div class="stake"><input id="stake" inputmode="decimal" aria-label="Mise" value="${esc(S.stake)}" placeholder="0"><span>€</span></div>
     <div class="quick">${[5, 10, 20, 50].map((v) => `<button data-a="q" data-v="${v}">${v} €</button>`).join('')}<button data-a="q" data-v="max">Max</button></div>
-    ${i.odds ? `<div class="row"><span>Cote combinée</span><b>${cote(i.odds)}</b></div>` : ''}
-    <div class="row"><span>Mise totale</span><b>${eur(i.total)}</b></div>
+    <div class="row"><span>Cote totale</span><b>${cote(i.odds)}</b></div>
+    <div class="row"><span>Mise</span><b>${eur(i.total)}</b></div>
     <div class="row"><span>Gain potentiel</span><b class="gain">${eur(i.gain)}</b></div>
     ${i.total > S.balance ? '<div class="warn">Ton solde ne couvre pas cette mise.</div>' : ''}
-    <button class="go" data-a="place" ${i.ok ? '' : 'disabled'}>Valider le pari</button>
+    <button class="go" data-a="place" ${i.ok ? '' : 'disabled'}>Valider le ticket</button>
   </div>`;
 }
 function renderBets() {
   if (!S.bets.length) return `<div class="empty"><b>Aucun pari pour l'instant</b>Tes paris en cours et terminés apparaîtront ici.</div>`;
   const lbl = { pending: 'En cours', won: 'Gagné', lost: 'Perdu', void: 'Remboursé' };
   return S.bets.map((b) => {
-    const odds = b.legs.reduce((a, l) => a * l.odds, 1);
+    const odds = comboOdds(b.legs);
     const legs = b.legs.map((l) => {
       const m = matchById(S.world, l.matchId);
       const lv = m && liveState(S.world, m, now());
@@ -337,7 +333,6 @@ document.addEventListener('click', (e) => {
   else if (a === 'filter') { S.filter = t.dataset.v; renderAll(); }
   else if (a === 'league') { S.league = t.dataset.v; renderAll(); }
   else if (a === 'rm') { S.slip = S.slip.filter((s) => s.key !== t.dataset.k); save(); renderAll(); }
-  else if (a === 'mode') { S.mode = t.dataset.v; renderAll(); }
   else if (a === 'q') { S.stake = t.dataset.v === 'max' ? String(Math.floor(S.balance * 100) / 100) : t.dataset.v; renderAll(); }
   else if (a === 'place') place();
 });

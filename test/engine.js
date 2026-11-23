@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createWorld, matchesOfSlot, matchById, simulate, marketsOf, trueProbs, liveState, resultOf, tableAt, lambdas, SLOT_MS, HALF_MS, BREAK_MS } from '../docs/sim.js';
+import { createWorld, roundMatches, matchesOfSlot, matchById, simulate, marketsOf, trueProbs, liveState, resultOf, tableAt, lambdas, SLOT_MS, HALF_MS, BREAK_MS } from '../docs/sim.js';
 
 const raw = JSON.parse(fs.readFileSync('docs/data/world.json', 'utf8'));
 const W = () => createWorld(JSON.parse(JSON.stringify(raw)));
@@ -24,14 +24,18 @@ t('calendrier : jamais une équipe deux fois dans un créneau, tous les matchs r
       seen.add(m.home); seen.add(m.away);
       assert.deepEqual(matchById(world, m.id), m);
     }
-    assert.equal(ms.length, world.groups[k % 6].teamIds.length / 2);
+    assert.ok(ms.length >= 1 && ms.length <= 6);
   }
+});
+
+t('maximum 6 matchs au même coup d\'envoi', () => {
+  for (let k = 0; k < 600; k++) assert.ok(matchesOfSlot(world, k).length <= 6 && matchesOfSlot(world, k).length > 0, 'créneau ' + k);
 });
 
 t('saison : chaque équipe affronte chacune 2 fois (domicile/extérieur) sur une saison', () => {
   for (let g = 0; g < 6; g++) {
     const grp = world.groups[g], cnt = {};
-    for (let rd = 0; rd < grp.rounds; rd++) for (const m of matchesOfSlot(world, (rd * 6) + g)) { const key = m.home + '>' + m.away; cnt[key] = (cnt[key] || 0) + 1; }
+    for (let rd = 0; rd < grp.rounds; rd++) for (const m of roundMatches(world, g, 0, rd)) { const key = m.home + '>' + m.away; cnt[key] = (cnt[key] || 0) + 1; }
     const n = grp.teamIds.length;
     assert.equal(Object.keys(cnt).length, n * (n - 1), grp.name);
     assert.ok(Object.values(cnt).every((v) => v === 1), grp.name);

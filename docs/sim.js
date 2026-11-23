@@ -6,7 +6,8 @@ export const HALF_MS = 14 * 60e3;            // mi-temps réelle : 14 min
 export const BREAK_MS = 2 * 60e3;            // pause : 2 min
 export const BETTING_AHEAD = 6;              // paris ouverts sur les 6 prochains créneaux (3 h)
 const SHARP = 1.3, FORM_W = 0.16;           // écart de niveau accentué, poids de la forme récente
-export const VERSION = 2;                    // à incrémenter si le modèle change (les anciens paris sont alors remboursés)
+export const VERSION = 3;
+export const MAX_PARALLEL = 6;               // 6 matchs maximum au même coup d'envoi (une journée est jouée en vagues)                    // à incrémenter si le modèle change (les anciens paris sont alors remboursés)
 
 const BASE_HOME = 1.5, BASE_AWAY = 1.2;      // buts moyens à domicile / à l'extérieur
 const HT_SHARE = 0.45;                       // part des buts marqués en 1re mi-temps
@@ -49,7 +50,10 @@ function pickWeighted(items, weights, r) {
 
 // ---------- monde (équipes réelles, forces dérivées de leurs vraies stats) ----------
 export function createWorld(raw) {
-  const groups = raw.leagues.map((L) => ({ ...L, rounds: 2 * (L.teamIds.length - 1) }));
+  const groups = raw.leagues.map((L) => {
+    const pairs = Math.floor(L.teamIds.length / 2), waves = Math.ceil(pairs / MAX_PARALLEL);
+    return { ...L, rounds: 2 * (L.teamIds.length - 1), pairs, waves, size: Math.ceil(pairs / waves) };
+  });
   const teams = raw.teams;
   // forces d'attaque et de défense, relatives à la moyenne de la compétition d'origine
   const domestic = {};
@@ -84,10 +88,10 @@ export function createWorld(raw) {
 export function teamForm(world, teamId, g, season, round) {
   const key = `form|${teamId}|${g}|${season}|${round}`;
   if (world.cache.has(key)) return world.cache.get(key);
-  const grp = world.groups[g], n = world.groups.length, seq = [];
+  const seq = [];
   let pts = 0, gf = 0, ga = 0;
   for (let rd = round - 1; rd >= 0 && seq.length < 5; rd--) {
-    const m = matchesOfSlot(world, (season * grp.rounds + rd) * n + g).find((x) => x.home === teamId || x.away === teamId);
+    const m = roundMatches(world, g, season, rd).find((x) => x.home === teamId || x.away === teamId);
     if (!m) continue;
     const s = simulate(world, m), home = m.home === teamId;
     const f = home ? s.ftHome : s.ftAway, a = home ? s.ftAway : s.ftHome;
@@ -115,11 +119,19 @@ export const slotOf = (t) => Math.floor(t / SLOT_MS);
 export const slotStart = (k) => k * SLOT_MS;
 
 export function slotInfo(world, k) {
-  const g = k % world.groups.length;
+  const G = world.groups.length, g = k % G;
   const grp = world.groups[g];
-  const roundIdx = Math.floor(k / world.groups.length);
+  const turn = Math.floor(k / G);
+  const roundIdx = Math.floor(turn / grp.waves), wave = turn % grp.waves;
   const season = Math.floor(roundIdx / grp.rounds);
-  return { k, g, group: grp, season, round: roundIdx % grp.rounds, kickoff: slotStart(k) };
+  return { k, g, group: grp, season, round: roundIdx % grp.rounds, wave, kickoff: slotStart(k) };
+}
+const kOf = (world, g, season, round, wave) => ((season * world.groups[g].rounds + round) * world.groups[g].waves + wave) * world.groups.length + g;
+// tous les matchs d'une journée (toutes vagues confondues)
+export function roundMatches(world, g, season, round) {
+  const out = [];
+  for (let w = 0; w < world.groups[g].waves; w++) out.push(...matchesOfSlot(world, kOf(world, g, season, round, w)));
+  return out;
 }
 
 function pairsOf(world, info) {
@@ -142,21 +154,21 @@ function pairsOf(world, info) {
 }
 
 export function matchesOfSlot(world, k) {
-  const info = slotInfo(world, k);
-  return pairsOf(world, info).map((p, i) => ({
+  const info = slotInfo(world, k), grp = info.group;
+  return pairsOf(world, info).map((p, i) => ({ p, i })).slice(info.wave * grp.size, (info.wave + 1) * grp.size).map(({ p, i }) => ({
     id: `${info.g}.${info.season}.${info.round}.${i}`,
-    k, g: info.g, season: info.season, round: info.round, i,
-    league: info.group.name, country: info.group.country, leagueId: info.group.id,
+    k, g: info.g, season: info.season, round: info.round, wave: info.wave, i,
+    league: grp.name, country: grp.country, leagueId: grp.id,
     home: p.home, away: p.away, kickoff: info.kickoff,
   }));
 }
 
 export function matchById(world, id) {
   const [g, season, round, i] = id.split('.').map(Number);
-  const n = world.groups.length, grp = world.groups[g];
-  if (!grp) return null;
-  const k = (season * grp.rounds + round) * n + g;
-  return matchesOfSlot(world, k)[i] || null;
+  const grp = world.groups[g];
+  if (!grp || i >= grp.pairs) return null;
+  const wave = Math.floor(i / grp.size);
+  return matchesOfSlot(world, kOf(world, g, season, round, wave)).find((m) => m.i === i) || null;
 }
 
 // ---------- simulation d'un match ----------
@@ -243,8 +255,7 @@ export function tableAt(world, g, season, upToRound) {
   const rows = {};
   for (const id of grp.teamIds) rows[id] = { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
   for (let rd = 0; rd < upToRound; rd++) {
-    const k = (season * grp.rounds + rd) * n + g;
-    for (const m of matchesOfSlot(world, k)) {
+    for (const m of roundMatches(world, g, season, rd)) {
       const s = simulate(world, m), h = rows[m.home], a = rows[m.away];
       h.p++; a.p++; h.gf += s.ftHome; h.ga += s.ftAway; a.gf += s.ftAway; a.ga += s.ftHome;
       if (s.ftHome > s.ftAway) { h.w++; a.l++; h.pts += 3; } else if (s.ftHome < s.ftAway) { a.w++; h.l++; a.pts += 3; } else { h.d++; a.d++; h.pts++; a.pts++; }

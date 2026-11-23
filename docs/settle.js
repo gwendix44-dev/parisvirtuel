@@ -36,7 +36,7 @@ export function settleBet(bet, results) {
   else if (legs.every((l) => l.status !== 'pending')) {
     const eff = legs.reduce((acc, l) => acc * (l.status === 'won' ? l.odds : 1), 1);
     if (legs.every((l) => l.status === 'void')) { status = 'void'; payout = bet.stake; }
-    else { status = 'won'; payout = round2(bet.stake * eff); }
+    else { status = 'won'; payout = round2(bet.stake * round2(eff)); }
   }
   return { ...bet, legs, status, payout };
 }

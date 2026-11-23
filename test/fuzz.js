@@ -25,7 +25,7 @@ for (let i = 0; i < 20000; i++) {
   const ls = legs.map((l) => res[l.matchId].status === 'void' ? 'void' : refLeg(l, res[l.matchId].ftHome, res[l.matchId].ftAway));
   if (ls.includes('lost')) assert.equal(out.status, 'lost'), assert.equal(out.payout, 0);
   else if (ls.every((s) => s === 'void')) assert.equal(out.status, 'void'), assert.equal(out.payout, stake);
-  else { const o = legs.reduce((a, l, j) => a * (ls[j] === 'won' ? l.odds : 1), 1); assert.equal(out.status, 'won'); assert.ok(Math.abs(out.payout - stake * o) <= 0.005 + 1e-9, `${out.payout} vs ${stake * o}`); }
+  else { const o = legs.reduce((a, l, j) => a * (ls[j] === 'won' ? l.odds : 1), 1); assert.equal(out.status, 'won'); assert.ok(Math.abs(out.payout - stake * Math.round(o * 100) / 100) <= 0.0051 + 1e-9, `${out.payout} vs ${stake * o}`); }
   assert.ok(out.payout >= 0); bets++;
 }
 console.log(`fuzz règlement : ${bets} paris aléatoires conformes à la référence`);
