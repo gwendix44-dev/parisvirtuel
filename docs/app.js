@@ -11,8 +11,9 @@ const LS = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('pv_' + k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('pv_' + k, JSON.stringify(v)); } catch {} },
 };
-const START = 100, REFILL_MS = 24 * 3600e3;
-if (LS.get('ver', 0) !== 2) { for (const k of ['balance', 'bets', 'slip', 'broke']) localStorage.removeItem('pv_' + k); LS.set('ver', 2); }
+const START = 25, REFILL_MS = 24 * 3600e3;
+if (LS.get('ver', 0) < 2) { for (const k of ['balance', 'bets', 'slip', 'broke']) localStorage.removeItem('pv_' + k); }
+if (LS.get('ver', 0) < 3) { LS.set('balance', Math.min(LS.get('balance', START), START)); LS.set('ver', 3); }
 const S = {
   tab: 'matches', filter: 'all', league: 'all', mode: 'single', stake: '10',
   world: null, detail: null, dtab: 'bets', open: new Set(['1N2']), sig: '',
@@ -94,7 +95,7 @@ function settleAll() {
   const t2 = now();
   if (S.balance < 0.01 && !S.bets.some(pending)) {
     if (!S.broke) { S.broke = t2; changed = true; }
-    else if (t2 - S.broke >= REFILL_MS) { S.balance = START; S.broke = null; changed = true; toast('+100 € : nouveau dépôt'); }
+    else if (t2 - S.broke >= REFILL_MS) { S.balance = START; S.broke = null; changed = true; toast('+25 € : nouveau dépôt'); }
   } else if (S.broke) { S.broke = null; changed = true; }
   if (changed) { save(); $('#bal b').textContent = eur(S.balance); }
   return changed;
@@ -260,7 +261,7 @@ function renderSlip() {
     ${i.dup ? '<div class="warn">Deux sélections du même match : retire-en une pour valider.</div>' : ''}
     ${n > 1 ? '<div class="note">Une seule mise pour tout le ticket. Si une sélection est perdue, tout le ticket est perdu.</div>' : ''}
     <div class="stake"><input id="stake" inputmode="decimal" aria-label="Mise" value="${esc(S.stake)}" placeholder="0"><span>€</span></div>
-    <div class="quick">${[5, 10, 20, 50].map((v) => `<button data-a="q" data-v="${v}">${v} €</button>`).join('')}<button data-a="q" data-v="max">Max</button></div>
+    <div class="quick">${[2, 5, 10, 25].map((v) => `<button data-a="q" data-v="${v}">${v} €</button>`).join('')}<button data-a="q" data-v="max">Max</button></div>
     <div class="row"><span>Cote totale</span><b>${cote(i.odds)}</b></div>
     <div class="row"><span>Mise</span><b>${eur(i.total)}</b></div>
     <div class="row"><span>Gain potentiel</span><b class="gain">${eur(i.gain)}</b></div>
@@ -300,7 +301,7 @@ function renderAll() {
   const bn = $('#banner');
   const left = S.broke ? Math.max(0, REFILL_MS - (now() - S.broke)) : 0;
   bn.hidden = SPEED === 1 && !S.broke;
-  bn.textContent = S.broke ? `Solde épuisé : nouveau dépôt de 100 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.` : `Mode accéléré ×${SPEED} (test).`;
+  bn.textContent = S.broke ? `Solde épuisé : nouveau dépôt de 25 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.` : `Mode accéléré ×${SPEED} (test).`;
   const keep = document.activeElement?.id === 'stake';
   $('#view').innerHTML = S.tab === 'matches' ? renderMatches() : S.tab === 'slip' ? renderSlip() : renderBets();
   S.sig = sigNow();
@@ -315,7 +316,7 @@ let lastEv = '';
 function tick() {
   if (!S.world) return;
   const changed = settleAll();
-  if (S.broke) { const bn = $('#banner'); const left = Math.max(0, REFILL_MS - (now() - S.broke)); bn.hidden = false; bn.textContent = `Solde épuisé : nouveau dépôt de 100 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.`; }
+  if (S.broke) { const bn = $('#banner'); const left = Math.max(0, REFILL_MS - (now() - S.broke)); bn.hidden = false; bn.textContent = `Solde épuisé : nouveau dépôt de 25 € dans ${Math.floor(left / 3600e3)} h ${String(Math.ceil((left % 3600e3) / 60e3) % 60).padStart(2, '0')} min.`; }
   if (sigNow() !== S.sig || (changed && S.tab !== 'matches')) { renderAll(); return; }
   if (S.tab === 'matches') {
     document.querySelectorAll('.match').forEach((el) => {
@@ -357,7 +358,7 @@ $('#slipbar').addEventListener('click', () => { S.tab = 'slip'; renderAll(); win
 $('#menu').addEventListener('click', () => {
   const s = document.createElement('div');
   s.className = 'sheet';
-  s.innerHTML = `<div><b>Règles</b><p>Dépôt de départ : 100 € fictifs. Si tu dépenses tout et qu'aucun pari n'est en cours, 100 € te sont rendus 24 h plus tard.</p><p>Un match dure 30 minutes. Les résultats viennent d'une simulation basée sur les vraies stats et la forme des équipes.</p><button data-x="close">Fermer</button></div>`;
+  s.innerHTML = `<div><b>Règles</b><p>Dépôt de départ : 25 € fictifs. Si tu dépenses tout et qu'aucun pari n'est en cours, 25 € te sont rendus 24 h plus tard.</p><p>Un match dure 30 minutes. Les résultats viennent d'une simulation basée sur les vraies stats et la forme des équipes.</p><button data-x="close">Fermer</button></div>`;
   s.addEventListener('click', (e) => { if (e.target === s || e.target.dataset?.x === 'close') s.remove(); });
   document.body.appendChild(s);
 });
